@@ -1,104 +1,111 @@
 #include <iomanip>
 #include <sstream>
+#include "util.hpp"
+#include "util_hw.hpp"
+#include "util_rsa.hpp"
 
-#include "util.h"
-#include "util_hw.h"
-#include "util_rsa.h"
-
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
-  auto usage_print = [&]() {
-    std::cerr << "Usage: " << argv[0] << " -d /path/to/items -k private_key.pem"
-              << " -o items/var/signature" << std::endl;
+    auto usage_print = [&]() {
+        usage(
+            {
+                argv[0],
+                "-d /path/to/items",
+                "-k private_key.pem",
+                "-o items/var/signature",
+            },
+            {
+                "-d Path to unpacked files",
+                "-k Path from private_key.pem (Without password)",
+                "-o Path to save signature file",
+            });
+    };
 
-    std::cerr << " -d Path unpacked files" << std::endl
-              << " -k Path from private_key.pem (Without password)" << std::endl
-              << " -o Path to save signature file" << std::endl;
+    std::string path_items, path_sig_item_list;
+    std::string path_key_priv, path_out_sig;
 
-    std::exit(EXIT_FAILURE);
-  };
-
-  std::string path_items, path_sig_item_list;
-  std::string path_key_priv, path_out_sig;
-
-  int opt;
-  while ((opt = getopt(argc, argv, "d:k:o:")) != -1) {
-    switch (opt) {
-      case 'd':
-        path_items = optarg;
-        break;
-      case 'k':
-        path_key_priv = optarg;
-        break;
-      case 'o':
-        path_out_sig = optarg;
-        break;
-    }
-  }
-
-  if (path_items.empty() || path_key_priv.empty() || path_out_sig.empty()) {
-    usage_print();
-  }
-
-  path_sig_item_list = HW_ItemPathOnFS(path_items, "/sig_item_list.txt");
-
-  try {
-
-    struct HW_Firmware fmw = {};
-
-    std::stringstream sig_data;
-    std::fstream sig_item_list;
-
-    std::string RSA_key_private =
-        file_read(file_open(path_key_priv, std::ios::in | std::ios::binary));
-
-    sig_item_list = file_open(path_sig_item_list, std::ios::in);
-    std::string line;
-
-    while (std::getline(sig_item_list, line)) {
-
-      struct huawei_item hi = {};
-
-      // '+' sign '-' no sign
-      if (line.front() != '+') {
-        std::cout << "[ - ] Verify Item Skip: " << line.substr(2) << std::endl;
-        continue;
-      }
-
-      line.erase(0, 2);
-
-      std::cout << "[ + ] Verify Item Add: " << line << std::endl;
-
-      std::snprintf(hi.item, sizeof(hi.item), "%s", line.c_str());
-      fmw.items_hdr.push_back(hi);
+    for (int opt; (opt = getopt(argc, argv, "d:k:o:")) != -1;) {
+        switch (opt) {
+            case 'd':
+                path_items = optarg;
+                break;
+            case 'k':
+                path_key_priv = optarg;
+                break;
+            case 'o':
+                path_out_sig = optarg;
+                break;
+        }
     }
 
-    if (!fmw.items_hdr.size()) {
-      throw_err("items_hdr.size() == 0", "Count of items");
+    if (path_items.empty() || path_key_priv.empty() || path_out_sig.empty()) {
+        usage_print();
     }
 
-    HW_ItemsReadFromFS(fmw, path_items);
+    path_sig_item_list = FilePathOnFS(path_items, "/sig_item_list.txt");
 
-    sig_data << fmw.items_hdr.size() << '\n';
-    for (size_t i = 0; i < fmw.items_hdr.size(); ++i) {
+    try {
 
-      auto &hi  = fmw.items_hdr.at(i);
-      auto &raw = fmw.items_raw.at(i);
+        Firmware firmware = {};
 
-      auto item_path   = HW_ItemParse(hi.item);
-      auto item_sha256 = sha256_sum(raw.data(), raw.size());
+        std::stringstream sig_data;
+        std::fstream sig_item_list;
 
-      sig_data << item_sha256 << ' ' << item_path << '\n';
+        std::string RSA_key_private =
+            FileRead(path_key_priv, std::ios::in | std::ios::binary);
+
+        sig_item_list = FileOpen(path_sig_item_list, std::ios::in);
+
+        for (std::string line; std::getline(sig_item_list, line);) {
+
+            struct huawei_item hi = {};
+
+            if (line.size() <= 2) {
+                continue;
+            }
+
+            if (line.front() != '+') {
+                std::cout << "[ - ] Verify Item Skip: " << line.substr(2) << std::endl;
+                continue;
+            }
+
+            line.erase(0, 2);
+
+            std::cout << "[ + ] Verify Item Add: " << line << std::endl;
+
+            std::snprintf(hi.item, sizeof(hi.item), "%s", line.c_str());
+            firmware.AddItemHeader(hi);
+        }
+
+        if (firmware.getItemsHeader().empty()) {
+            throw_err("Empty items on header", "Count of items");
+        }
+
+        firmware.ReadItemFromFS(path_items);
+        sig_data << firmware.getItemsHeader().size() << '\n'; // Need char '\n'
+
+        for (size_t i = 0; i < firmware.getItemsHeader().size(); ++i) {
+
+            auto &hi  = firmware.getItemsHeader().at(i);
+            auto &raw = firmware.getItemsRaw().at(i);
+
+            auto item_path   = firmware.PathItemOnFmw(hi.item);
+            auto item_sha256 = sha256_sum(raw.data(), raw.size());
+
+            sig_data << item_sha256 << ' ' << item_path << '\n';
+        }
+
+        sig_data << firmware.CryptoSign(sig_data.str(), RSA_key_private);
+
+        auto sig_file = FileOpen(path_out_sig, std::ios::out | std::ios::binary);
+        sig_file << sig_data.rdbuf();
+
+        std::cout << "[ * ] Path to new signature file: " << path_out_sig << std::endl;
+
+    } catch (const std::exception &e) {
+        std::cerr << "[ - ] Error. " << e.what() << std::endl;
     }
 
-    sig_data << HW_FirmwareSign(sig_data.str(), RSA_key_private);
-
-    file_open(path_out_sig, std::ios::out | std::ios::binary) << sig_data.str();
-    std::cout << "[ * ] Path to new signature file: " << path_out_sig << std::endl;
-
-  } catch (const std::exception &e) {
-    std::cerr << "[ - ] Error. " << e.what() << std::endl;
-  }
-
-  return 0;
+    return 0;
 }

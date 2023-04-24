@@ -1,12 +1,10 @@
 #ifndef RSA_UTIL_H
 #define RSA_UTIL_H
 
-#include <string>
 #include <memory>
-
+#include <string>
 #include <openssl/sha.h>
 #include <openssl/rsa.h>
-//#include <openssl/pem.h>
 
 enum RSA_KEY { PRIVATE, PUBLIC };
 
@@ -26,4 +24,5 @@ bool RSA_verify_data(const std::string &key_pub,
                      int sig_data_sz,
                      const uint8_t *sig_data,
                      int sig_hash_sz);
+
 #endif // RSA_UTIL_H

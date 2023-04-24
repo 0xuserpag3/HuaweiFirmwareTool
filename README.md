@@ -36,7 +36,7 @@ $ ./hw_fmw -d unpack -u -f /home/user/hg8245hv300r015c10spc130_common_all.bin -v
 Files that will be added to the firmware should be marked with a **'+'** sign in file **upacked/item_list.txt**
 ```
 $ head -n 5 unpack/item_list.txt
-HWNP
+HWNP(0x504e5748)
 256 494|4B4|534|5D4|614|;COMMON|CMCC|
 + 0 file:/var/UpgradeCheck.xml UPGRDCHECK NULL 0
 - 1 flash:flash_config FLASH_CONFIG NULL 0
@@ -45,7 +45,7 @@ HWNP
 ### More information about the file "item_list.txt"
 ```
 First line: 
-  (0) HWNP - "Magic"
+  (0) HWNP(0x504e5748 - little endian) - "Magic"
 Second line: 
   (0) 256 - size "Product list"
   (1) 494|... - "Product" list
